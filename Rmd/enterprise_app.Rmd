@@ -1,0 +1,465 @@
+---
+title: "Hospital Manager"
+resource_files:
+- data/processed/quarterly.fst
+- data/processed/mape_overalls.fst
+runtime: shiny
+output:
+  flexdashboard::flex_dashboard:
+    orientation: row
+---
+
+
+```{r setup, include=FALSE}
+les_packages <- lapply(c('prophet','data.table','tidyverse','ggplot','ggthemes','DT',
+                         'reshape2','fst','plotly','DT','ggthemes'),require, character.only = TRUE)
+## load files
+output_path =  '../data/processed/'
+
+APE = function(actual,pred){
+  if(is.nan(actual) | is.na(actual)) return(NA)
+  if(actual!=0){
+    return(abs(pred-actual) / abs(actual))
+  } else {
+    return(NA)
+  }
+}
+
+
+gen_forecast = function(df,y,n.changepoints = 10, periods=20, l1= 0.05){
+  #train_test
+  sample_train = df %>% filter(train_flag==1) 
+  sample_test = df %>% filter(test_flag==1)
+  #create prophet dfs
+  prophet_train = data.frame(ds = sample_train$ds, y = sample_train[,y])
+  prophet_test = data.frame(ds = sample_train$ds,y_actual = sample_test[,y])
+      
+  #initialize model
+  m = prophet(changepoint.prior.scale = l1)
+      
+  #fit
+  m = fit.prophet(m, prophet_train)
+      
+  #create data for predictions
+  future = make_future_dataframe(m, periods = periods, freq = 'quarter') 
+  
+  #get results
+  forecast = predict(m, future)
+  #plot(m,forecast)
+  forecast$ds = as.character(forecast$ds)
+  header_df = data.frame(hosid = df$hosid,
+                         ds = df$ds,
+                         id = df$id,
+                         y_actual = df[,y],
+                         test_flag = ifelse(df$test_flag==1,TRUE,FALSE))
+  result = header_df %>% inner_join(forecast) %>%
+    mutate(APE = mapply(APE,y_actual,yhat))
+  
+  mape_group = result %>% filter(test_flag==1) %>% select(ds,y_actual,yhat,APE)
+  
+  mape_overall = result %>% filter(test_flag==1) %>% summarise(nb_pred = n(),
+                                      MAPE= mean(APE,na.rm = TRUE),
+                                      MdAPE = median(APE,na.rm = TRUE))
+  
+  return(list(result,mape_group,mape_overall))
+}
+
+plot_prophet = function(result,w=500,h=300,scaler=1/1e6){
+  g = ggplot(result,aes(x=ds,y=y_actual,color=test_flag)) + geom_point() +
+    geom_line(data=result,aes(x=ds,y=yhat,group=1)) + 
+    geom_ribbon(data=result,aes(ymin=yhat_lower,ymax=yhat_upper,group=1),alpha=0.3) +
+    theme_fivethirtyeight() + scale_color_wsj() +
+    scale_y_continuous(labels=function(x) x*scaler) +
+    scale_x_discrete(breaks=result$ds[seq(1,length(result$ds),4)]) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1), legend.position = 'none') 
+  ggplotly(g,width=w,height=h)
+}
+
+#load dataframe
+quarterly = read_fst(paste0(output_path,'quarterly.fst'))
+
+#perfect fits
+#0.05 - 29
+#fix
+#0.05 - 23
+examples = data.frame(hosid = c(29,23)) %>% inner_join(quarterly %>% group_by(hosid) %>% summarise(hosname=min(hosname)) %>% ungroup)
+```
+
+
+Overall
+=====================================
+
+Row 
+-----------------------------------------------------------------------
+
+### Scenario
+
+```{r}
+selectInput('scenario', 'Pick Hospital', examples$hosname)
+scenario_y = c('patient_margin','total_patient_revenue','total_patient_expenses')
+
+df = reactive({
+  quarterly %>% 
+    filter(hosid==examples[examples$hosname==input$scenario,'hosid'] & (train_flag==1 | test_flag ==1))
+})
+```
+
+Forecast Statistics
+
+
+```{r}
+renderDataTable({
+  mape_overalls = NULL
+  for (y in scenario_y){
+    mape_overall = gen_forecast(df(),y)[[3]] %>% mutate(variable = y) %>%
+      select(variable,nb_pred,MAPE,MdAPE)
+    mape_overalls = rbind(mape_overalls,mape_overall)
+  }
+  datatable(mape_overalls,
+                    colnames = c('Variable' = 1, 
+                       '# Forecasts' = 2 ,
+                       'Mean Error' = 3 ,
+                       'Median Error' = 4 
+                       ),
+          class = 'cell-border stripe' , 
+          rownames = FALSE,
+          options=list(dom='t')
+          ) %>% 
+  formatPercentage(c('Mean Error','Median Error'), 2)
+})
+```
+
+### Patient Margin
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'patient_margin')[[1]])
+})
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Total Patient Revenue
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_patient_revenue')[[1]])
+})
+```
+
+### Total Patient Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_patient_expenses')[[1]])
+})
+```
+
+Revenue
+=====================================
+
+Row 
+-----------------------------------------------------------------------
+
+### Total Patient Revenue
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_patient_revenue')[[1]])
+})
+```
+
+
+### Visit Trend
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_outpatient_visits')[[1]],scaler=1)
+})
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Patient Revenue Breakdown
+
+```{r}
+revenue_sources = c('acute_inpatient_total_revenue','outpatient_home_health_total_revenue',
+                    'chronic_inpatient_total_revenue')
+renderPlotly({
+  results = NULL
+  for (revenue_source in revenue_sources){
+    result = gen_forecast(df(),revenue_source)[[1]] %>% mutate(variable = substr(revenue_source,1,5)) %>%
+      select(variable,ds,yhat)
+    results=rbind(results,result)
+  }
+  results_agg = results %>% group_by(ds) %>% summarise(total_yhat = sum(yhat)) %>% ungroup
+  results = results %>% inner_join(results_agg) %>% mutate(yhat_per = yhat / total_yhat)
+  g = ggplot(results, aes(x=ds,y=yhat_per,fill=variable,group=variable)) + 
+    geom_area() + theme_fivethirtyeight() + scale_fill_wsj() +
+    scale_y_continuous(labels=scales::percent) +
+    scale_x_discrete(breaks=results$ds[seq(1,length(results$ds),4)]) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=500,height=300)
+})
+```
+
+### Admit Trend
+
+```{r}
+volume_sources = c('acute_care_total_admits','chronic_total_admits')
+renderPlotly({
+  results = NULL
+  for (volume_source in volume_sources){
+    result = gen_forecast(df(),volume_source)[[1]] %>% mutate(variable = substr(volume_source,1,5)) %>%
+      select(variable,ds,yhat,y_actual,yhat_lower,yhat_upper,test_flag)
+    results=rbind(results,result)
+  }
+  g = ggplot(results, aes(x=ds,y=y_actual,color=variable)) + geom_point() + 
+               geom_line(data=results,aes(x=ds,y=yhat,group=variable)) + 
+               geom_ribbon(data=results,aes(ymin=yhat_lower,ymax=yhat_upper,group=variable),alpha=0.3) + 
+               theme_fivethirtyeight() + scale_color_wsj() + 
+               scale_x_discrete(breaks=results$ds[seq(1,length(results$ds),4)]) + 
+               theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.title=element_blank()) 
+  ggplotly(g,width=500,height=300)
+ })
+```
+
+
+
+Expenses
+=====================================
+
+Inputs {.sidebar}
+-------------------------------------
+
+Set efficiency targets for patient expenses.
+
+```{r}
+selectInput('total_payroll_expenses', 'Payroll', c('y_actual','yhat','yhat_lower','yhat_upper'))
+selectInput('employee_benefit_expenses', 'Employee Benefits', c('y_actual','yhat','yhat_lower','yhat_upper'))
+selectInput('bad_debts_expenses', 'Bad Debts', c('y_actual','yhat','yhat_lower','yhat_upper'))
+selectInput('supply_expenses', 'Supplies', c('y_actual','yhat','yhat_lower','yhat_upper'))
+selectInput('total_contractual_total', 
+            'Contractual Adjustments', c('y_actual','yhat','yhat_lower','yhat_upper'))
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Payroll Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_payroll_expenses')[[1]],w=400,h=200)
+})
+```
+
+### Employee Benefits Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'employee_benefit_expenses')[[1]],w=400,h=200)
+})
+```
+
+### Bad Debts Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'bad_debts_expenses')[[1]],w=400,h=200)
+})
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Supply Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'supply_expenses')[[1]],w=400,h=200)
+})
+```
+
+###  Contractual Adjustments
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_contractual_total')[[1]],w=400,h=200)
+})
+```
+
+### Depreciation Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'depre_expenses')[[1]],w=400,h=200)
+})
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Interest Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'interest_expenses')[[1]],w=400,h=200)
+})
+```
+
+### Charity Care
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_charity_care')[[1]],w=400,h=200)
+})
+```
+
+### Other Operating Expenses
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'other_operating_expenses')[[1]],w=400,h=200)
+})
+```
+
+
+Scorecard
+=====================================
+
+Row
+-------------------------------------
+
+### Expansion
+
+```{r}
+fluidRow(
+      column(6,
+        selectInput('add_revenue', 'Expected Revenue', c('y_actual','yhat','yhat_lower','yhat_upper'),
+                    width=200)
+      ),
+      column(6,
+        numericInput('add_ppe','Add PPE (M)',value = 0,width=200),
+        numericInput('add_interest','Interest Rate',value = 0,width=200),
+        numericInput('add_other_operating','Additional Operating Expenses (M)',value = 0,width=200)
+      )
+)
+
+patient_expenses = c('total_payroll_expenses','employee_benefit_expenses',
+            'supply_expenses','bad_debts_expenses',
+            'total_contractual_total')
+
+margin_call = reactive({
+  control_df = df()[,c('ds','operating_margin','net_margin','total_assets')] %>%
+    mutate(roa = net_margin/total_assets)
+  #patient expenses
+  alt_df = df()[,c('ds','test_flag')]
+  for(i in patient_expenses){
+    input_i = eval(parse(text=paste0('input$',i)))
+    alt_df[,i] = gen_forecast(df(),i)[[1]][,input_i]
+  }
+  #other expenses
+  alt_df$interest_expenses = df()$interest_expenses + input$add_interest * input$add_ppe * 1e6
+  alt_df$depre_expenses = df()$depre_expenses + input$add_ppe * 1e6 / 5
+  alt_df$total_charity_care = df()$total_charity_care
+  alt_df$other_operating_expenses = df()$other_operating_expenses + input$add_other_operating * 1e6
+  alt_df = alt_df %>% mutate(total_operating_expenses = total_payroll_expenses+employee_benefit_expenses+
+                               supply_expenses+bad_debts_expenses+other_operating_expenses+
+                               depre_expenses+interest_expenses)
+  #asset
+  alt_df$total_assets = df()$total_assets + input$add_ppe * 1e6
+  #total revenue
+  alt_df$total_revenue = gen_forecast(df(),'total_patient_revenue')[[1]][,input$add_revenue] +
+    df()$other_operating_revenue
+  alt_df$net_non_operating = df()$net_non_operating
+  alt_df$tax_revenue = df()$tax_revenue
+  #calculate metrics
+  alt_df = alt_df %>%
+    mutate(operating_margin = total_revenue - (total_operating_expenses + total_contractual_total +
+                                               total_charity_care),
+           net_margin = operating_margin + net_non_operating + tax_revenue,
+           roa = net_margin / total_assets)
+  alt_df = alt_df[,c('ds','test_flag','operating_margin','net_margin','total_assets','roa')]
+  control_m = melt(control_df,id.vars=c('ds')) %>% mutate(control_flag = 'a')
+  alt_m = melt(alt_df,id.vars=c('ds','test_flag')) %>% filter(test_flag==1) %>% select(-test_flag) %>%
+    mutate(control_flag='b')
+  margin_df = rbind(control_m,alt_m)
+  margin_df
+})
+```
+
+### Operating Margin
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='operating_margin')
+  g = ggplot(mar,aes(x=ds,y=value,color=as.factor(control_flag), group=as.factor(control_flag))) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_fill_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)]) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=500,height=300)
+})
+```
+
+Row
+-------------------------------------
+
+### Net Margin
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='net_margin')
+  g = ggplot(mar,aes(x=ds,y=value,color=as.factor(control_flag), group=as.factor(control_flag))) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_fill_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)]) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=500,height=300)
+})
+```
+
+### Return on Asset
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='roa')
+  g = ggplot(mar,aes(x=ds,y=value,color=as.factor(control_flag), group=as.factor(control_flag))) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_fill_wsj() +
+    scale_y_continuous(labels=scales::percent) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)]) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=500,height=300)
+})
+```
+
+
+Model Performance
+=====================================
+
+Row
+-------------------------------------
+
+### Mean and Median Absolute Percentage Errors
+
+```{r}
+mape_performance = read_fst(paste0(output_path,'mape_overalls.fst')) %>%
+  select(variable,nb_pred,MAPE,MdAPE)
+datatable(mape_performance %>% arrange(MdAPE),
+                  colnames = c('Variable' = 1, 
+                     '# Forecasts' = 2 ,
+                     'Mean Error' = 3 ,
+                     'Median Error' = 4 
+                     ),
+        class = 'cell-border stripe' , 
+        rownames = FALSE, options=list(pageLength = 15)
+        ) %>% 
+formatPercentage(c('Mean Error','Median Error'), 2)
+```
