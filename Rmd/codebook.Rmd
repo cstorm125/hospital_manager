@@ -573,15 +573,23 @@ write_fst(quarterly,paste0(output_path,'quarterly.fst'))
 #train and test
 train_df = quarterly  %>% filter(train_flag == 1)
 test_df = quarterly %>% filter(test_flag == 1)
-all_col = names(train_df)[!grepl('ds|id|test_flag|train_flag|yrs|hosid|hosname|quarter|licensed_beds',names(train_df))]
-all_col = c('patient_margin')
+show_cols = c('patient_margin','total_patient_revenue','total_patient_expenses',
+              'outpatient_home_health_total_revenue',
+              'total_outpatient_visits','acute_inpatient_total_revenue',
+              'acute_care_total_admits','chronic_inpatient_total_revenue',
+              'chronic_total_admits','total_payroll_expenses','total_hours',
+              'employee_benefit_expenses','bad_debts_expenses','supply_expenses',
+              'total_contractual_total'
+              )
 mape_overalls = NULL 
-results = NULL
+mape_groups = NULL
 
-for(col in all_col){
+
+for(col in show_cols){
   #set up dependent variable
   y = col
   xs = c()
+  results = NULL
 
   for(the_id in enough_data$hosid){
     #create df for each hospital
@@ -627,12 +635,13 @@ for(col in all_col){
   }
   
   mape_group = results %>% group_by(id) %>% summarise(nb_pred = n(),MAPE= mean(APE,na.rm = TRUE), 
-                                                          MdAPE = median(APE,na.rm = TRUE))
+                                                          MdAPE = median(APE,na.rm = TRUE)) %>%
+    ungroup %>% mutate(variable=y)
   mape_overall = results %>% summarise(nb_pred = n(),MAPE= mean(APE,na.rm = TRUE), 
                                        MdAPE = median(APE,na.rm = TRUE)) %>% ungroup %>%
     mutate(variable=y)
   mape_overalls = rbind(mape_overalls,mape_overall)
-  print(paste0('done ',y))
+  mape_groups = rbind(mape_groups,mape_group)
 }
 
 write_fst(mape_overalls,paste0(output_path,'mape_overalls.fst'))
