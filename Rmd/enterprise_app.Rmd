@@ -1,5 +1,5 @@
 ---
-title: "Hospital Manager"
+title: "Continuum Enterprise"
 resource_files:
 - data/processed/quarterly.fst
 - data/processed/mape_overalls.fst
@@ -11,6 +11,9 @@ output:
 
 
 ```{r setup, include=FALSE}
+#comments
+#comparison between 10M and 5M OPD buildings; MPV IRR q
+
 les_packages <- lapply(c('prophet','data.table','tidyverse','ggplot','ggthemes','DT',
                          'reshape2','fst','plotly','DT','ggthemes'),require, character.only = TRUE)
 ## load files
@@ -26,7 +29,7 @@ APE = function(actual,pred){
 }
 
 
-gen_forecast = function(df,y,n.changepoints = 10, periods=20, l1= 0.05){
+gen_forecast = function(df,y,periods=20, l1= 0.05){
   #train_test
   sample_train = df %>% filter(train_flag==1) 
   sample_test = df %>% filter(test_flag==1)
@@ -64,7 +67,7 @@ gen_forecast = function(df,y,n.changepoints = 10, periods=20, l1= 0.05){
   return(list(result,mape_group,mape_overall))
 }
 
-plot_prophet = function(result,w=690,h=290,scaler=1/1e6){
+plot_prophet = function(result,w=640,h=290,scaler=1/1e6){
   g = ggplot(result,aes(x=ds,y=y_actual,color=test_flag)) + geom_point() +
     geom_line(data=result,aes(x=ds,y=yhat,group=1)) + 
     geom_ribbon(data=result,aes(ymin=yhat_lower,ymax=yhat_upper,group=1),alpha=0.3) +
@@ -80,10 +83,28 @@ plot_prophet = function(result,w=690,h=290,scaler=1/1e6){
 quarterly = read_fst(paste0(output_path,'quarterly.fst'))
 
 #perfect fits
-#0.05 - 29
+#0.05 - 29, 3
 #fix
 #0.05 - 23
-examples = data.frame(hosid = c(29,23)) %>% inner_join(quarterly %>% group_by(hosid) %>% summarise(hosname=min(hosname)) %>% ungroup)
+examples = data.frame(hosid = c(3,29,23)) %>% inner_join(quarterly %>% group_by(hosid) %>% summarise(hosname=min(hosname)) %>% ungroup)
+```
+
+Sidebar {.sidebar}
+=====================================
+
+**ADJUST TARGETS:**
+
+```{r}
+sliderInput('total_patient_revenue', 'Patient Revenues (%)', -100,100,0,10)
+
+sliderInput('total_payroll_expenses', 'Payroll (%)', -100,100,0,10)
+
+sliderInput('employee_benefit_expenses', 'Employee Benefits (%)',-100,100,0,10)
+
+sliderInput('supply_expenses', 'Supplies and Utilities (%)', -100,100,0,10)
+
+sliderInput('total_contractual_total', 
+            'Contractual Adjustments (%)', -100,100,0,10)
 ```
 
 
@@ -106,7 +127,6 @@ df = reactive({
 ```
 
 Forecast Statistics
-
 
 ```{r}
 renderDataTable({
@@ -157,76 +177,90 @@ renderPlotly({
 })
 ```
 
+
 Revenue
 =====================================
 
-Row 
------------------------------------------------------------------------
-
-### Total Patient Revenue
-
-```{r}
-renderPlotly({
-  plot_prophet(gen_forecast(df(),'total_patient_revenue')[[1]])
-})
-```
-
-
-### Visit Trend
-
-```{r}
-renderPlotly({
-  plot_prophet(gen_forecast(df(),'total_outpatient_visits')[[1]],scaler=1)
-})
-```
 
 Row 
 -----------------------------------------------------------------------
 
-### Patient Revenue Breakdown
+### Inpatient Revenue
 
 ```{r}
-revenue_sources = c('acute_inpatient_total_revenue','outpatient_home_health_total_revenue',
-                    'chronic_inpatient_total_revenue')
 renderPlotly({
-  results = NULL
-  for (revenue_source in revenue_sources){
-    result = gen_forecast(df(),revenue_source)[[1]] %>% mutate(variable = substr(revenue_source,1,5)) %>%
-      select(variable,ds,yhat)
-    results=rbind(results,result)
-  }
-  results_agg = results %>% group_by(ds) %>% summarise(total_yhat = sum(yhat)) %>% ungroup
-  results = results %>% inner_join(results_agg) %>% mutate(yhat_per = yhat / total_yhat)
-  g = ggplot(results, aes(x=ds,y=yhat_per,fill=variable,group=variable)) + 
-    geom_area() + theme_fivethirtyeight() + scale_fill_wsj() +
-    scale_y_continuous(labels=scales::percent) +
-    scale_x_discrete(breaks=results$ds[seq(1,length(results$ds),4)],labels=function(x) substr(x,1,4)) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 1),
-          legend.title=element_blank())
-  ggplotly(g,width=690,height=290)
+  plot_prophet(gen_forecast(df(),'inpatient_total_revenue')[[1]],w=420,h=175)
 })
 ```
 
-### Admit Trend
+### Inpatient Admits
 
 ```{r}
-volume_sources = c('acute_care_total_admits','chronic_total_admits')
 renderPlotly({
-  results = NULL
-  for (volume_source in volume_sources){
-    result = gen_forecast(df(),volume_source)[[1]] %>% mutate(variable = substr(volume_source,1,5)) %>%
-      select(variable,ds,yhat,y_actual,yhat_lower,yhat_upper,test_flag)
-    results=rbind(results,result)
-  }
-  g = ggplot(results, aes(x=ds,y=y_actual,color=variable)) + geom_point() + 
-               geom_line(data=results,aes(x=ds,y=yhat,group=variable)) + 
-               geom_ribbon(data=results,aes(ymin=yhat_lower,ymax=yhat_upper,group=variable),alpha=0.3) + 
-               theme_fivethirtyeight() + scale_color_wsj() + 
-               scale_x_discrete(breaks=results$ds[seq(1,length(results$ds),4)],
-                                labels=function(x) substr(x,1,4)) + 
-               theme(axis.text.x = element_text(angle = 90, hjust = 1),legend.title=element_blank()) 
-  ggplotly(g,width=690,height=290)
- })
+  plot_prophet(gen_forecast(df(),'inpatient_total_admits')[[1]],w=420,h=175)
+})
+```
+
+### Inpatient Revenue per Admit
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'inpatient_per')[[1]],w=420,h=175)
+})
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Outpatient Revenue
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'outpatient_total_revenue')[[1]],w=420,h=175)
+})
+```
+
+### Outpatient Visits
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_outpatient_visits')[[1]],w=420,h=175)
+})
+```
+
+### Outpatient Revenue per Visit
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'outpatient_per')[[1]],w=420,h=175)
+})
+```
+
+Row 
+-----------------------------------------------------------------------
+
+### Total Patient Days
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_patient_days')[[1]],w=420,h=175)
+})
+```
+
+### Average Patient Days
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'total_patient_days')[[1]],w=420,h=175)
+})
+```
+
+### Revenue per Patient Day
+
+```{r}
+renderPlotly({
+  plot_prophet(gen_forecast(df(),'revenue_per_patient_days')[[1]],w=420,h=175)
+})
 ```
 
 
@@ -234,36 +268,22 @@ renderPlotly({
 Expenses
 =====================================
 
-Inputs {.sidebar}
--------------------------------------
-
-Set efficiency targets for patient expenses.
-
-```{r}
-selectInput('total_payroll_expenses', 'Payroll', c('y_actual','yhat','yhat_lower','yhat_upper'))
-selectInput('employee_benefit_expenses', 'Employee Benefits', c('y_actual','yhat','yhat_lower','yhat_upper'))
-selectInput('bad_debts_expenses', 'Bad Debts', c('y_actual','yhat','yhat_lower','yhat_upper'))
-selectInput('supply_expenses', 'Supplies', c('y_actual','yhat','yhat_lower','yhat_upper'))
-selectInput('total_contractual_total', 
-            'Contractual Adjustments', c('y_actual','yhat','yhat_lower','yhat_upper'))
-```
-
 Row 
 -----------------------------------------------------------------------
 
-### Payroll Expenses
+### **Payroll Expenses**
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'total_payroll_expenses')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'total_payroll_expenses')[[1]],w=420,h=175)
 })
 ```
 
-### Employee Benefits Expenses
+### **Employee Benefits Expenses**
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'employee_benefit_expenses')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'employee_benefit_expenses')[[1]],w=420,h=175)
 })
 ```
 
@@ -271,26 +291,26 @@ renderPlotly({
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'bad_debts_expenses')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'bad_debts_expenses')[[1]],w=420,h=175)
 })
 ```
 
 Row 
 -----------------------------------------------------------------------
 
-### Supply Expenses
+### **Supply Expenses**
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'supply_expenses')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'supply_expenses')[[1]],w=420,h=175)
 })
 ```
 
-###  Contractual Adjustments
+###  **Contractual Adjustments**
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'total_contractual_total')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'total_contractual_total')[[1]],w=420,h=175)
 })
 ```
 
@@ -298,7 +318,7 @@ renderPlotly({
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'depre_expenses')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'depre_expenses')[[1]],w=420,h=175)
 })
 ```
 
@@ -309,7 +329,7 @@ Row
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'interest_expenses')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'interest_expenses')[[1]],w=420,h=175)
 })
 ```
 
@@ -317,7 +337,7 @@ renderPlotly({
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'total_charity_care')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'total_charity_care')[[1]],w=420,h=175)
 })
 ```
 
@@ -325,7 +345,7 @@ renderPlotly({
 
 ```{r}
 renderPlotly({
-  plot_prophet(gen_forecast(df(),'other_operating_expenses')[[1]],w=370,h=175)
+  plot_prophet(gen_forecast(df(),'other_operating_expenses')[[1]],w=420,h=175)
 })
 ```
 
@@ -333,68 +353,102 @@ renderPlotly({
 Scorecard
 =====================================
 
-Row
--------------------------------------
-
-### Expansion
-
 ```{r}
-fluidRow(
-      column(6,
-        selectInput('add_revenue', 'Expected Revenue', c('y_actual','yhat','yhat_lower','yhat_upper'),
-                    width=175)
-      ),
-      column(6,
-        numericInput('add_ppe','Add PPE (M)',value = 0,width=175),
-        numericInput('add_interest','Interest Rate',value = 0,width=175),
-        numericInput('add_other_operating','Other Operating Expenses (M)',value = 0,width=175)
-      )
-)
-
 patient_expenses = c('total_payroll_expenses','employee_benefit_expenses',
-            'supply_expenses','bad_debts_expenses',
-            'total_contractual_total')
+            'supply_expenses','total_contractual_total')
 
 margin_call = reactive({
-  control_df = df()[,c('ds','patient_margin','operating_margin','net_margin','total_assets')] %>%
-    mutate(roa = net_margin/total_assets)
+  control_df = df()[,c('ds','patient_margin','total_patient_expenses',
+                       'total_operating_expenses',
+                       'operating_margin','net_margin','total_assets',
+                       'total_patient_revenue','total_revenue')]
+  
   #patient expenses
   alt_df = df()[,c('ds','test_flag')]
   for(i in patient_expenses){
     input_i = eval(parse(text=paste0('input$',i)))
-    alt_df[,i] = gen_forecast(df(),i)[[1]][,input_i]
+    alt_df[,i] = gen_forecast(df(),i)[[1]][,'yhat'] * (1 + input_i/100)
   }
+  
   #other expenses
-  alt_df$interest_expenses = df()$interest_expenses + input$add_interest * input$add_ppe * 1e6
-  alt_df$depre_expenses = df()$depre_expenses + input$add_ppe * 1e6 / 5
+  alt_df$bad_debts_expenses = df()$bad_debts_expenses
+  alt_df$interest_expenses = df()$interest_expenses + 
+    input$add_interest/100/4 * input$add_ppe * 1e6
+  alt_df$depre_expenses = df()$depre_expenses + input$add_ppe * 1e6 / 20
   alt_df$total_charity_care = df()$total_charity_care
-  alt_df$other_operating_expenses = df()$other_operating_expenses + input$add_other_operating * 1e6
-  alt_df = alt_df %>% mutate(total_operating_expenses = total_payroll_expenses+employee_benefit_expenses+
+  alt_df$other_operating_expenses = df()$other_operating_expenses + 
+    input$add_other_operating * 1e6 / 4
+  alt_df = alt_df %>% mutate(total_operating_expenses = 
+                               total_payroll_expenses+employee_benefit_expenses+
                                supply_expenses+bad_debts_expenses+other_operating_expenses+
-                               depre_expenses+interest_expenses)
+                               depre_expenses+interest_expenses,
+                            total_patient_expenses=total_payroll_expenses+ 
+                              employee_benefit_expenses + 
+                              supply_expenses + total_contractual_total)
   #asset
   alt_df$total_assets = df()$total_assets + input$add_ppe * 1e6
   #total revenue
-  alt_df$total_patient_revenue = gen_forecast(df(),'total_patient_revenue')[[1]][,input$add_revenue]
+  alt_df$total_patient_revenue = 
+    gen_forecast(df(),'total_patient_revenue')[[1]][,'yhat'] * 
+    (1 + input$total_patient_revenue/100)
   alt_df$total_revenue = alt_df$total_patient_revenue +
     df()$other_operating_revenue
   alt_df$net_non_operating = df()$net_non_operating
   alt_df$tax_revenue = df()$tax_revenue
   #calculate metrics
   alt_df = alt_df %>%
-    mutate(patient_margin = total_patient_revenue - (total_contractual_total + 
-                                               total_payroll_expenses+employee_benefit_expenses+
-                                               supply_expenses+bad_debts_expenses),
-           operating_margin = total_revenue - (total_operating_expenses + total_contractual_total +
+    mutate(patient_margin = total_patient_revenue - total_patient_expenses,
+           operating_margin = total_revenue - (total_operating_expenses + 
+                                               total_contractual_total +
                                                total_charity_care),
-           net_margin = operating_margin + net_non_operating + tax_revenue,
-           roa = net_margin / total_assets)
-  alt_df = alt_df[,c('ds','test_flag','patient_margin','operating_margin','net_margin','total_assets','roa')]
-  control_m = melt(control_df,id.vars=c('ds')) %>% mutate(control_flag = 'control')
-  alt_m = melt(alt_df,id.vars=c('ds','test_flag')) %>% filter(test_flag==1) %>% select(-test_flag) %>%
+           net_margin = operating_margin + net_non_operating + tax_revenue)
+  alt_df = alt_df[,
+    c('ds','test_flag','patient_margin','operating_margin','total_operating_expenses',
+      'total_patient_expenses','total_patient_revenue','total_revenue'
+      )]
+  
+  #plot df
+  alt_m = melt(alt_df,id.vars=c('ds','test_flag')) %>% 
+    filter(test_flag==1) %>% select(-test_flag) %>%
     mutate(control_flag='alternative')
+  
+  control_m = melt(control_df,id.vars=c('ds')) %>% mutate(control_flag = 'control')
+  
   margin_df = rbind(control_m,alt_m)
   margin_df
+})
+```
+
+Row
+-------------------------------------
+
+### Patient Revenue
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='total_patient_revenue')
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=420,height=290)
+})
+```
+
+### Patient Expenses
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='total_patient_expenses')
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=420,height=290)
 })
 ```
 
@@ -403,48 +457,147 @@ margin_call = reactive({
 ```{r}
 renderPlotly({
   mar = margin_call() %>% filter(variable=='patient_margin')
-  g = ggplot(mar,aes(x=ds,y=value,color=as.factor(control_flag), group=as.factor(control_flag))) + 
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
     geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
     scale_y_continuous(labels=function(x) x/1e6) +
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=690,height=290)
+  ggplotly(g,width=420,height=290)
 })
 ```
 
 Row
 -------------------------------------
 
+### Total Operating Revenue
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='total_revenue')
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=420,height=290)
+})
+```
+
+### Total Operating Expenses
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='total_operating_expenses')
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=420,height=290)
+})
+```
+
 ### Operating Margin
 
 ```{r}
 renderPlotly({
   mar = margin_call() %>% filter(variable=='operating_margin')
-  g = ggplot(mar,aes(x=ds,y=value,color=as.factor(control_flag), group=as.factor(control_flag))) + 
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
     geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
     scale_y_continuous(labels=function(x) x/1e6) +
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=690,height=290)
+  ggplotly(g,width=420,height=290)
 })
 ```
 
-### Return on Asset
+
+Expansion
+=====================================
+
+Row
+-------------------------------------
+
+### Investment
+
+```{r}
+fluidRow(
+      column(6,
+        numericInput('add_ppe','Add PPE (M)',value = 0),
+        numericInput('add_interest','Interest Rate (%)',value = 7),
+        numericInput('add_other_operating','Other Additional Expenses (M)',
+                     value = 0)
+      ),
+      column(6,
+        numericInput('discount_rate','Discount Rate (%)',value = 12),
+        renderText({
+          add_revenues = tail(gen_forecast(df(),
+            'total_patient_revenue')[[1]][,'yhat'] * input$total_patient_revenue/100,20)
+          sum_revenue = 0
+          for(i in 1:length(add_revenues)){
+            add_cashflow = add_revenues[i] - input$add_other_operating * 1e6 / 4 -
+              input$add_interest/100/4 * input$add_ppe * 1e6
+            sum_revenue = sum_revenue + (add_cashflow/(1+input$discount_rate)^(i/4))
+          }
+          paste0('5-year Net Present Value: ', 
+                 round((sum_revenue - input$add_ppe * 1e6)/1e6,2),'M')
+        })
+      )
+)
+```
+
+### Operating Margin
 
 ```{r}
 renderPlotly({
-  mar = margin_call() %>% filter(variable=='roa')
-  g = ggplot(mar,aes(x=ds,y=value,color=as.factor(control_flag), group=as.factor(control_flag))) + 
+  mar = margin_call() %>% filter(variable=='operating_margin')
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
     geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
     scale_y_continuous(labels=function(x) x/1e6) +
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=690,height=290)
+  ggplotly(g,width=680,height=290)
 })
 ```
+
+Row
+-------------------------------------
+
+### Operating Revenue
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='total_revenue')
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=680,height=290)
+})
+```
+
+### Operating Expenses
+
+```{r}
+renderPlotly({
+  mar = margin_call() %>% filter(variable=='total_operating_expenses')
+  g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
+    geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
+    scale_y_continuous(labels=function(x) x/1e6) +
+    scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          legend.title=element_blank())
+  ggplotly(g,width=680,height=290)
+})
+```
+
 
 Model Performance
 =====================================

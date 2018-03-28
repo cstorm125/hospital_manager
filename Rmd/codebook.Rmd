@@ -15,7 +15,8 @@ knitr::opts_chunk$set(echo = FALSE,warning=FALSE,message=FALSE)
 ```
 
 ```{r load data, results='hide'}
-les_packages <- lapply(c('prophet','data.table','tidyverse','ggplot','ggthemes','DT','readxl',
+les_packages <- lapply(c('prophet','data.table','tidyverse','ggplot','ggthemes','DT',
+                         'readxl', 'stringr',
                          'reshape2','fst'),require, character.only = TRUE)
 ## load files
 input_path = '../data/raw/'
@@ -506,7 +507,7 @@ names(quarterly) = c('yrs','hosid','hosname','quarter','licensed_beds',
 'gross_account_receivables_other','gross_account_receivables_total'
 )
 #ds
-quarterly$ds = paste0(quarterly$yrs,'-',sprintf('%02s',quarterly$quarter*3),'-01')
+quarterly$ds = paste0(quarterly$yrs,'-',str_pad(quarterly$quarter*3,2,pad=0),'-01')
 #test_flag
 #filter for those that has at least 88 data points 
 enough_data = quarterly %>% group_by(hosid) %>% summarise(nb_yrs = n()) %>% filter(nb_yrs>=88) %>%
@@ -525,16 +526,25 @@ quarterly = quarterly %>%
   #chronic inpatient = swing + snf + psych
   #patient revenue = outpatient&home + chronic_inpatient + acute_inpatient
   #total revenue = patient revenue + other operating revenue
-  outpatient_home_health_total_revenue = acute_outpatient_total_revenue + home_health_total_revenue,
+  outpatient_total_revenue = acute_outpatient_total_revenue + 
+    home_health_total_revenue,
   chronic_total_admits = psych_total_admits + swing_bed_total_admits + snf_total_admits,
-  chronic_inpatient_total_revenue = psych_total_revenue + swing_bed_total_revenue + snf_total_revenue,
-  total_revenue = total_patient_revenue + other_operating_revenue) %>%
+  chronic_inpatient_total_revenue = psych_total_revenue + swing_bed_total_revenue + 
+    snf_total_revenue,
+  inpatient_total_revenue = chronic_inpatient_total_revenue + 
+    acute_inpatient_total_revenue,
+  inpatient_total_admits = chronic_total_admits + acute_care_total_admits,
+  total_revenue = total_patient_revenue + other_operating_revenue,
+  total_patient_days = acute_care_total_patient_days + swing_bed_total_patient_days +
+    snf_total_patient_days + psych_total_patient_days) %>%
   #efficiency metrics
   mutate(
   #revenue per times
-  outpatient_home_health_per = outpatient_home_health_total_revenue / total_outpatient_visits,
-  acute_inpatient_per = acute_inpatient_total_revenue / acute_care_total_admits,
-  chronic_inpatient_per = chronic_inpatient_total_revenue / chronic_total_admits,
+  outpatient_per = outpatient_total_revenue / total_outpatient_visits,
+  inpatient_per = inpatient_total_revenue / inpatient_total_admits,
+  #revenue per days
+  revenue_per_patient_days = inpatient_total_revenue / total_patient_days,
+  avg_patient_days = total_patient_days / inpatient_total_admits,
   #patient expenses per revenue
   contractual_eff = total_contractual_total / total_patient_revenue,
   physician_eff = physician_payroll_expenses / total_patient_revenue,
@@ -551,8 +561,8 @@ quarterly = quarterly %>%
   #pure margin
   mutate(
   #operating expense = payroll + benefits + bad debts + supply + (others + depre + interest)
-  #patient expense = payroll + benefits + bad debts + supply + (contractual)
-  total_patient_expenses = total_payroll_expenses+ employee_benefit_expenses + bad_debts_expenses +
+  #patient expense = payroll + benefits + supply + (contractual)
+  total_patient_expenses = total_payroll_expenses+ employee_benefit_expenses + 
     supply_expenses + total_contractual_total,
   #operating margin = total revenue - (contractual + charity + operating expense)
   #patient margin = patient revenue - patient expense
@@ -574,7 +584,7 @@ write_fst(quarterly,paste0(output_path,'quarterly.fst'))
 train_df = quarterly  %>% filter(train_flag == 1)
 test_df = quarterly %>% filter(test_flag == 1)
 show_cols = c('patient_margin','total_patient_revenue','total_patient_expenses',
-              'outpatient_home_health_total_revenue',
+              'outpatient_total_revenue',
               'total_outpatient_visits','acute_inpatient_total_revenue',
               'acute_care_total_admits','chronic_inpatient_total_revenue',
               'chronic_total_admits','total_payroll_expenses','total_hours',
@@ -603,7 +613,7 @@ for(col in show_cols){
                               y_actual = sample_test[,y])
     
     #initialize model
-    m = prophet(n.changepoints = 5)
+    m = prophet(changepoint.prior.scale = 0.05)
     
     #add regressors
     for (x in xs){
@@ -647,5 +657,70 @@ for(col in show_cols){
 write_fst(mape_overalls,paste0(output_path,'mape_overalls.fst'))
 #mape_overalls = read_fst(paste0(output_path,'mape_overalls.fst'))
 ```
+
+# Playground
+
+```{r}
+#train and test
+train_df = quarterly  %>% filter(train_flag == 1)
+test_df = quarterly %>% filter(test_flag == 1)
+
+#set up dependent variable
+y = 'avg_patient_days'
+xs = c()
+results = NULL
+
+for(the_id in enough_data$hosid[1:10]){
+  #create df for each hospital
+  sample_train = train_df %>% filter(hosid==the_id) 
+  sample_test = test_df %>% filter(hosid==the_id)
+  
+  #create prophet dfs
+  prophet_train = data.frame(ds = sample_train$ds, 
+                             y = sample_train[,y])
+  prophet_test = data.frame(ds = sample_train$ds,
+                            y_actual = sample_test[,y])
+  
+  #initialize model
+  m = prophet(changepoint.prior.scale = 0.05)
+  
+  #add regressors
+  for (x in xs){
+    prophet_train[,x] = sapply(sample_train[,x],function(x) x + rnorm(1))
+    prophet_test[,x] = sapply(sample_test[,x],function(x) x + rnorm(1))
+    m = m %>% add_regressor(x)
+  }
+  
+  #fit
+  m = fit.prophet(m, prophet_train)
+  
+  #create data for predictions
+  future = make_future_dataframe(m, periods = 20, freq = 'quarter') 
+  
+  #add regressors
+  for (x in xs){
+    future[,x] = c(prophet_train[,x],prophet_test[,x])
+  }
+  #get results
+  forecast = predict(m, future)
+  #plot(m,forecast)
+  forecast$ds = as.character(forecast$ds)
+  header_df = data.frame(hosid = sample_test$hosid,
+                         ds =sample_test$ds,id = sample_test$id, 
+                         y_actual = prophet_test$y_actual)
+  result = header_df %>% inner_join(forecast)
+  result$APE = mapply(APE,result$y_actual,result$yhat)
+  results = rbind(results,result)
+}
+
+mape_group = results %>% group_by(id) %>% summarise(nb_pred = n(),MAPE= mean(APE,na.rm = TRUE), 
+                                                        MdAPE = median(APE,na.rm = TRUE)) %>%
+  ungroup %>% mutate(variable=y)
+mape_overall = results %>% summarise(nb_pred = n(),MAPE= mean(APE,na.rm = TRUE), 
+                                     MdAPE = median(APE,na.rm = TRUE)) %>% ungroup %>%
+  mutate(variable=y)
+View(mape_overall)
+```
+
 
 
