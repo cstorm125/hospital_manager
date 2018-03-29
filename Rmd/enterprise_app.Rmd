@@ -5,8 +5,7 @@ resource_files:
 - data/processed/mape_overalls.fst
 runtime: shiny
 output:
-  flexdashboard::flex_dashboard:
-    orientation: row
+  flexdashboard::flex_dashboard
 ---
 
 
@@ -372,12 +371,10 @@ margin_call = reactive({
   
   #other expenses
   alt_df$bad_debts_expenses = df()$bad_debts_expenses
-  alt_df$interest_expenses = df()$interest_expenses + 
-    input$add_interest/100/4 * input$add_ppe * 1e6
-  alt_df$depre_expenses = df()$depre_expenses + input$add_ppe * 1e6 / 20
+  alt_df$interest_expenses = df()$interest_expenses
+  alt_df$depre_expenses = df()$depre_expenses 
   alt_df$total_charity_care = df()$total_charity_care
-  alt_df$other_operating_expenses = df()$other_operating_expenses + 
-    input$add_other_operating * 1e6 / 4
+  alt_df$other_operating_expenses = df()$other_operating_expenses 
   alt_df = alt_df %>% mutate(total_operating_expenses = 
                                total_payroll_expenses+employee_benefit_expenses+
                                supply_expenses+bad_debts_expenses+other_operating_expenses+
@@ -385,8 +382,6 @@ margin_call = reactive({
                             total_patient_expenses=total_payroll_expenses+ 
                               employee_benefit_expenses + 
                               supply_expenses + total_contractual_total)
-  #asset
-  alt_df$total_assets = df()$total_assets + input$add_ppe * 1e6
   #total revenue
   alt_df$total_patient_revenue = 
     gen_forecast(df(),'total_patient_revenue')[[1]][,'yhat'] * 
@@ -410,7 +405,7 @@ margin_call = reactive({
   #plot df
   alt_m = melt(alt_df,id.vars=c('ds','test_flag')) %>% 
     filter(test_flag==1) %>% select(-test_flag) %>%
-    mutate(control_flag='alternative')
+    mutate(control_flag='forecast')
   
   control_m = melt(control_df,id.vars=c('ds')) %>% mutate(control_flag = 'control')
   
@@ -433,7 +428,7 @@ renderPlotly({
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=420,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
 
@@ -448,7 +443,7 @@ renderPlotly({
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=420,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
 
@@ -463,7 +458,7 @@ renderPlotly({
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=420,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
 
@@ -481,7 +476,7 @@ renderPlotly({
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=420,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
 
@@ -496,7 +491,7 @@ renderPlotly({
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=420,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
 
@@ -511,75 +506,215 @@ renderPlotly({
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=420,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
+
 
 
 Expansion
 =====================================
 
-Row
+```{r}
+patient_expenses = c('total_payroll_expenses','employee_benefit_expenses',
+            'supply_expenses','total_contractual_total')
+
+comparison_call = reactive({
+  #patient expenses
+  alt1_df = df()[,c('ds','test_flag')]
+  for(i in patient_expenses){
+    input_i = eval(parse(text=paste0('input$',i)))
+    alt1_df[,i] = gen_forecast(df(),i)[[1]][,'yhat'] * (1 + input_i/100)
+  }
+  
+  #other expenses
+  alt1_df$bad_debts_expenses = df()$bad_debts_expenses
+  alt1_df$interest_expenses = df()$interest_expenses + (1e6 * input$add_ppe1 * input$add_interest1/100) / 20
+  alt1_df$depre_expenses = df()$depre_expenses + 1e6 * input$add_ppe1 / 20
+  alt1_df$total_charity_care = df()$total_charity_care
+  alt1_df$other_operating_expenses = df()$other_operating_expenses + 1e6 * input$add_other_operating1 / 4
+  alt1_df = alt1_df %>% mutate(total_operating_expenses = 
+                               total_payroll_expenses+employee_benefit_expenses+
+                               supply_expenses+bad_debts_expenses+other_operating_expenses+
+                               depre_expenses+interest_expenses,
+                            total_patient_expenses=total_payroll_expenses+ 
+                              employee_benefit_expenses + 
+                              supply_expenses + total_contractual_total)
+  #total revenue
+  alt1_df$total_patient_revenue = 
+    gen_forecast(df(),'total_patient_revenue')[[1]][,'yhat'] * 
+    (1 + input$total_patient_revenue/100) + 1e6 * input$add_revenue1 / 4
+  alt1_df$total_revenue = alt1_df$total_patient_revenue +
+    df()$other_operating_revenue
+  alt1_df$net_non_operating = df()$net_non_operating
+  alt1_df$tax_revenue = df()$tax_revenue
+  #calculate metrics
+  alt1_df = alt1_df %>%
+    mutate(patient_margin = total_patient_revenue - total_patient_expenses,
+           operating_margin = total_revenue - (total_operating_expenses + 
+                                               total_contractual_total +
+                                               total_charity_care),
+           net_margin = operating_margin + net_non_operating + tax_revenue)
+  alt1_df = alt1_df[,
+    c('ds','test_flag','patient_margin','operating_margin','total_operating_expenses',
+      'total_patient_expenses','total_patient_revenue','total_revenue'
+      )]
+  
+  #plot df
+  alt1_m = melt(alt1_df,id.vars=c('ds','test_flag')) %>% 
+    filter(test_flag==1) %>% select(-test_flag) %>%
+    mutate(control_flag='option1')
+
+  #patient expenses
+  alt2_df = df()[,c('ds','test_flag')]
+  for(i in patient_expenses){
+    input_i = eval(parse(text=paste0('input$',i)))
+    alt2_df[,i] = gen_forecast(df(),i)[[1]][,'yhat'] * (1 + input_i/100)
+  }
+  
+  #other expenses
+  alt2_df$bad_debts_expenses = df()$bad_debts_expenses
+  alt2_df$interest_expenses = df()$interest_expenses + (1e6 * input$add_ppe2 * input$add_interest2/100) / 20
+  alt2_df$depre_expenses = df()$depre_expenses + 1e6 * input$add_ppe2 / 20
+  alt2_df$total_charity_care = df()$total_charity_care
+  alt2_df$other_operating_expenses = df()$other_operating_expenses + 1e6 * input$add_other_operating2 / 4
+  alt2_df = alt2_df %>% mutate(total_operating_expenses = 
+                               total_payroll_expenses+employee_benefit_expenses+
+                               supply_expenses+bad_debts_expenses+other_operating_expenses+
+                               depre_expenses+interest_expenses,
+                            total_patient_expenses=total_payroll_expenses+ 
+                              employee_benefit_expenses + 
+                              supply_expenses + total_contractual_total)
+  #total revenue
+  alt2_df$total_patient_revenue = 
+    gen_forecast(df(),'total_patient_revenue')[[1]][,'yhat'] * 
+    (1 + input$total_patient_revenue/100) + 1e6 * input$add_revenue2 / 4
+  alt2_df$total_revenue = alt2_df$total_patient_revenue +
+    df()$other_operating_revenue
+  alt2_df$net_non_operating = df()$net_non_operating
+  alt2_df$tax_revenue = df()$tax_revenue
+  #calculate metrics
+  alt2_df = alt2_df %>%
+    mutate(patient_margin = total_patient_revenue - total_patient_expenses,
+           operating_margin = total_revenue - (total_operating_expenses + 
+                                               total_contractual_total +
+                                               total_charity_care),
+           net_margin = operating_margin + net_non_operating + tax_revenue)
+  alt2_df = alt2_df[,
+    c('ds','test_flag','patient_margin','operating_margin','total_operating_expenses',
+      'total_patient_expenses','total_patient_revenue','total_revenue'
+      )]
+  
+  #plot df
+  alt2_m = melt(alt2_df,id.vars=c('ds','test_flag')) %>% 
+    filter(test_flag==1) %>% select(-test_flag) %>%
+    mutate(control_flag='option2')
+
+
+  comparison_df = rbind(alt1_m,alt2_m)
+  comparison_df
+})
+```
+
+Column
 -------------------------------------
 
-### Investment
+### Investments
 
 ```{r}
 fluidRow(
       column(6,
-        numericInput('add_ppe','Add PPE (M)',value = 0),
-        numericInput('add_interest','Interest Rate (%)',value = 7),
-        numericInput('add_other_operating','Other Additional Expenses (M)',
-                     value = 0)
+        renderText('Option 1'),
+        numericInput('add_revenue1','Annual Additional Revenue (M)',value = 4),
+        numericInput('add_ppe1','Total Investment (M)',value =10),
+        numericInput('add_interest1','Annual Interest Rate (%)',value = 7),
+        numericInput('add_other_operating1','Other Additional Annual Expenses (M)',
+                     value = 1),
+        renderText('NPV/IRR:'),
+        renderPlotly({
+          add_revenue = 1e6 * input$add_revenue1 / 4
+          add_cashflow = add_revenue - (input$add_other_operating1 * 1e6 / 4) - 
+          		(input$add_interest1/100 * input$add_ppe1 * 1e6 / 20)
+          sum_df = data.frame(discount_rate = 0:50/100)
+          sum_df$sum_revenue = sapply(sum_df$discount_rate,
+          function(x){
+            sum_revenue = 0
+          	for(i in 1:20){
+          	  sum_revenue = sum_revenue + (add_cashflow/(1+x/4)^i)
+          	}
+            sum_revenue - input$add_ppe1 * 1e6
+          })
+          g = ggplot(sum_df,aes(x=discount_rate,y=sum_revenue/1e6,group=1)) + 
+            geom_point(size=0.5)+
+            scale_x_continuous(labels=scales::percent) +
+            theme_fivethirtyeight() +
+            geom_hline(yintercept = 0, color='red')
+          ggplotly(g,height=300,width=290)
+        })
       ),
       column(6,
-        numericInput('discount_rate','Discount Rate (%)',value = 12),
-        renderText({
-          add_revenues = tail(gen_forecast(df(),
-            'total_patient_revenue')[[1]][,'yhat'] * input$total_patient_revenue/100,20)
-          sum_revenue = 0
-          for(i in 1:length(add_revenues)){
-            add_cashflow = add_revenues[i] - input$add_other_operating * 1e6 / 4 -
-              input$add_interest/100/4 * input$add_ppe * 1e6
-            sum_revenue = sum_revenue + (add_cashflow/(1+input$discount_rate)^(i/4))
-          }
-          paste0('5-year Net Present Value: ', 
-                 round((sum_revenue - input$add_ppe * 1e6)/1e6,2),'M')
+        renderText('Option 2'),
+        numericInput('add_revenue2','Annual Additional Revenue (M)',value = 30),
+        numericInput('add_ppe2','Total Investment (M)',value = 100),
+        numericInput('add_interest2','Annual Interest Rate (%)',value = 7),
+        numericInput('add_other_operating2','Other Additional Annual Expenses (M)',
+                     value = 5),
+        renderText('NPV/IRR:'),
+        renderPlotly({
+          add_revenue = 1e6 * input$add_revenue2 / 4
+          add_cashflow = add_revenue - (input$add_other_operating2 * 1e6 / 4) - 
+          		(input$add_interest2/100 * input$add_ppe2 * 1e6 / 20)
+          sum_df = data.frame(discount_rate = 0:50/100)
+          sum_df$sum_revenue = sapply(sum_df$discount_rate,
+          function(x){
+            sum_revenue = 0
+          	for(i in 1:20){
+          	  sum_revenue = sum_revenue + (add_cashflow/(1+x/4)^i)
+          	}
+            sum_revenue - input$add_ppe2 * 1e6
+          })
+          g = ggplot(sum_df,aes(x=discount_rate,y=sum_revenue/1e6,group=1)) + 
+            geom_point(size=0.5)+
+            scale_x_continuous(labels=scales::percent) +
+            theme_fivethirtyeight() +
+            geom_hline(yintercept = 0, color='red')
+          ggplotly(g,height=300,width=290)
         })
       )
 )
 ```
 
+
+Column
+-------------------------------------
+
 ### Operating Margin
 
 ```{r}
 renderPlotly({
-  mar = margin_call() %>% filter(variable=='operating_margin')
+  mar = comparison_call() %>% filter(variable=='operating_margin')
   g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
     geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
     scale_y_continuous(labels=function(x) x/1e6) +
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=680,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
-
-Row
--------------------------------------
 
 ### Operating Revenue
 
 ```{r}
 renderPlotly({
-  mar = margin_call() %>% filter(variable=='total_revenue')
+  mar = comparison_call() %>% filter(variable=='total_revenue')
   g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
     geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
     scale_y_continuous(labels=function(x) x/1e6) +
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=680,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
 
@@ -587,14 +722,14 @@ renderPlotly({
 
 ```{r}
 renderPlotly({
-  mar = margin_call() %>% filter(variable=='total_operating_expenses')
+  mar = comparison_call() %>% filter(variable=='total_operating_expenses')
   g = ggplot(mar,aes(x=ds,y=value,color=control_flag, group=control_flag)) + 
     geom_point() + geom_line() + theme_fivethirtyeight() + scale_color_wsj() +
     scale_y_continuous(labels=function(x) x/1e6) +
     scale_x_discrete(breaks=mar$ds[seq(1,length(mar$ds),4)],labels=function(x) substr(x,1,4)) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1),
           legend.title=element_blank())
-  ggplotly(g,width=680,height=290)
+  ggplotly(g,width=640,height=175)
 })
 ```
 
@@ -605,19 +740,29 @@ Model Performance
 Row
 -------------------------------------
 
-### Mean and Median Absolute Percentage Errors
+### 5-year Median Absolute Percentage Errors
 
 ```{r}
 mape_performance = read_fst(paste0(output_path,'mape_overalls.fst')) %>%
-  select(variable,nb_pred,MAPE,MdAPE)
-datatable(mape_performance %>% arrange(MdAPE),
-                  colnames = c('Variable' = 1, 
-                     '# Forecasts' = 2 ,
-                     'Mean Error' = 3 ,
-                     'Median Error' = 4 
-                     ),
-        class = 'cell-border stripe' , 
-        rownames = FALSE, options=list(pageLength = 15)
-        ) %>% 
-formatPercentage(c('Mean Error','Median Error'), 2)
+  select(variable,nb_pred,MAPE,MdAPE) %>% arrange(-MdAPE)
+
+g = ggplot(mape_performance,aes(x=MdAPE,y=reorder(variable,-MdAPE))) + 
+  geom_point(size=2) +
+  theme_fivethirtyeight() + scale_color_wsj() +
+  scale_x_continuous(labels = scales::percent) +
+  geom_vline(xintercept=mean(mape_performance$MdAPE), color='red') +
+  theme(legend.position = 'none', axis.text.y = element_text(size=16)) 
+ggplotly(g)
+
+
+# datatable(mape_performance %>% arrange(MdAPE),
+#                   colnames = c('Variable' = 1, 
+#                      '# Forecasts' = 2 ,
+#                      'Mean Error' = 3 ,
+#                      'Median Error' = 4 
+#                      ),
+#         class = 'cell-border stripe' , 
+#         rownames = FALSE, options=list(pageLength = 15)
+#         ) %>% 
+# formatPercentage(c('Mean Error','Median Error'), 2)
 ```

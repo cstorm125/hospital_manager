@@ -584,11 +584,10 @@ write_fst(quarterly,paste0(output_path,'quarterly.fst'))
 train_df = quarterly  %>% filter(train_flag == 1)
 test_df = quarterly %>% filter(test_flag == 1)
 show_cols = c('patient_margin','total_patient_revenue','total_patient_expenses',
-              'outpatient_total_revenue',
-              'total_outpatient_visits','acute_inpatient_total_revenue',
-              'acute_care_total_admits','chronic_inpatient_total_revenue',
-              'chronic_total_admits','total_payroll_expenses','total_hours',
-              'employee_benefit_expenses','bad_debts_expenses','supply_expenses',
+              'outpatient_total_revenue','total_outpatient_visits',
+              'inpatient_total_admits','total_patient_days','inpatient_total_revenue',
+              'inpatient_per','avg_patient_days',
+              'total_payroll_expenses','employee_benefit_expenses','supply_expenses',
               'total_contractual_total'
               )
 mape_overalls = NULL 
